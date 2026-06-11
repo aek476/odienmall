@@ -1,50 +1,64 @@
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 import psycopg2
 
 app = Flask(__name__)
 
-# ฟังก์ชันสำหรับเชื่อมต่อฐานข้อมูล PostgreSQL ของ odienmall
+# ฟังก์ชันเชื่อมต่อฐานข้อมูล
 def get_db_connection():
-    conn = psycopg2.connect(
+    return psycopg2.connect(
         host="localhost",
-        database="odienmall_db1",  # ใช้ชื่อดาต้าเบสที่คุณเอกสร้างใน pgAdmin
-        user="postgres",           # ยูสเซอร์หลักของ PostgreSQL
-        password="5555500000"  # ⚠️ อย่าลืมเปลี่ยนเป็นรหัสผ่านจริงของคุณเอกนะคะ
+        database="odienmall_db1",  # ดาต้าเบสที่คุณเอกสร้าง
+        user="postgres",
+        password="5555500000"  # ⚠️ อย่าลืมเปลี่ยนเป็นรหัสเข้า pgAdmin ของคุณเอกนะคะ
     )
-    return conn
 
 @app.route('/')
 def index():
     try:
-        # เปิดการเชื่อมต่อฐานข้อมูล
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id, name, price, category, image_url FROM products;')
+        rows = cur.fetchall()
+        products_data = [{"id": r[0], "name": r[1], "price": float(r[2]), "category": r[3], "image": r[4]} for r in rows]
+        cur.close()
+        conn.close()
+        return render_template('index.html', products=products_data)
+    except Exception as e:
+        return f"เกิดข้อผิดพลาดในการดึงข้อมูลสินค้า: {e}"
+
+# 🔥 API สำหรับรับออเดอร์จากหน้าบ้านมาบันทึกลง PostgreSQL จริง
+@app.route('/api/checkout', methods=['POST'])
+def checkout():
+    try:
+        data = request.get_json()
+        cart_items = data.get('items', [])
+        total_price = data.get('total_price', 0)
+        
+        if not cart_items:
+            return jsonify({"status": "error", "message": "ไม่มีสินค้าในตะกร้า"}), 400
+            
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # เขียนคำสั่ง SQL ดึงข้อมูลสินค้าออกมาทั้งหมด
-        cur.execute('SELECT id, name, price, category, image_url FROM products;')
-        rows = cur.fetchall()
+        # 1. บันทึกลงตาราง orders เพื่อเอาเลขบิล (order_id)
+        cur.execute('INSERT INTO orders (total_price) VALUES (%s) RETURNING order_id;', (total_price,))
+        order_id = cur.fetchone()[0]
         
-        # แปลงข้อมูลให้อยู่ในรูปแบบที่หน้าเว็บเข้าใจ
-        products_data = []
-        for row in rows:
-            products_data.append({
-                "id": row[0],
-                "name": row[1],
-                "price": float(row[2]),
-                "category": row[3],
-                "image": row[4]
-            })
+        # 2. วนลูปบันทึกสินค้าแต่ละชิ้นที่อยู่ในตะกร้าลงตาราง order_items
+        for item in cart_items:
+            cur.execute('''
+                INSERT INTO order_items (order_id, product_id, product_name, price, quantity)
+                VALUES (%s, %s, %s, %s, %s);
+            ''', (order_id, item['id'], item['name'], item['price'], item['quantity']))
             
-        # ปิดการเชื่อมต่อ
+        conn.commit()
         cur.close()
         conn.close()
         
-        # ส่งข้อมูลไปแสดงผลที่หน้าจอเว็บ
-        return render_template('index.html', products=products_data)
+        return jsonify({"status": "success", "message": f"🎉 บันทึกคำสั่งซื้อเลขที่ {order_id} เข้าฐานข้อมูลสำเร็จแล้วค่ะ!"})
         
     except Exception as e:
-        # หากเชื่อมต่อไม่สำเร็จ จะแสดงข้อความเตือน Error บนหน้าเว็บ
-        return f"เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล: {e}"
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
