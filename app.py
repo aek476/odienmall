@@ -1,23 +1,50 @@
 from flask import Flask, render_template, jsonify
+import psycopg2
 
 app = Flask(__name__)
 
-# ดาต้าจำลองของเครื่องใช้ไฟฟ้าภายในร้าน odienmall
-products_data = [
-    {"id": 1, "name": "ตู้เย็น 2 ประตู Inverter", "price": 12900, "category": "ตู้เย็น", "image": "https://images.unsplash.com/photo-1571175432247-5238fd759a55?w=500"},
-    {"id": 2, "name": "เครื่องซักผ้าฝาหน้า 10 KG", "price": 18500, "category": "เครื่องซักผ้า", "image": "https://images.unsplash.com/photo-1610557892470-55d9e80c0bce?w=500"},
-    {"id": 3, "name": "สมาร์ททีวี 4K Oled 55 นิ้ว", "price": 24900, "category": "ทีวี", "image": "https://images.unsplash.com/photo-1593305841991-05c297ba4575?w=500"}
-]
+# ฟังก์ชันสำหรับเชื่อมต่อฐานข้อมูล PostgreSQL ของ odienmall
+def get_db_connection():
+    conn = psycopg2.connect(
+        host="localhost",
+        database="odienmall_db1",  # ใช้ชื่อดาต้าเบสที่คุณเอกสร้างใน pgAdmin
+        user="postgres",           # ยูสเซอร์หลักของ PostgreSQL
+        password="5555500000"  # ⚠️ อย่าลืมเปลี่ยนเป็นรหัสผ่านจริงของคุณเอกนะคะ
+    )
+    return conn
 
-# 1. หน้าแรกของเว็บ (ดึงข้อมูลสินค้าไปแสดงผล)
 @app.route('/')
 def index():
-    return render_template('index.html', products=products_data)
-
-# 2. API สำหรับให้ TypeScript เรียกดูข้อมูลสินค้า
-@app.route('/api/products')
-def get_products():
-    return jsonify(products_data)
+    try:
+        # เปิดการเชื่อมต่อฐานข้อมูล
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # เขียนคำสั่ง SQL ดึงข้อมูลสินค้าออกมาทั้งหมด
+        cur.execute('SELECT id, name, price, category, image_url FROM products;')
+        rows = cur.fetchall()
+        
+        # แปลงข้อมูลให้อยู่ในรูปแบบที่หน้าเว็บเข้าใจ
+        products_data = []
+        for row in rows:
+            products_data.append({
+                "id": row[0],
+                "name": row[1],
+                "price": float(row[2]),
+                "category": row[3],
+                "image": row[4]
+            })
+            
+        # ปิดการเชื่อมต่อ
+        cur.close()
+        conn.close()
+        
+        # ส่งข้อมูลไปแสดงผลที่หน้าจอเว็บ
+        return render_template('index.html', products=products_data)
+        
+    except Exception as e:
+        # หากเชื่อมต่อไม่สำเร็จ จะแสดงข้อความเตือน Error บนหน้าเว็บ
+        return f"เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล: {e}"
 
 if __name__ == '__main__':
     app.run(debug=True)
